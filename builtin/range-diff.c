@@ -40,6 +40,8 @@ int cmd_range_diff(int argc, const char **argv, const char *prefix)
 	struct option *options;
 	int res = 0;
 	struct strbuf range1 = STRBUF_INIT, range2 = STRBUF_INIT;
+	struct object_id oid;
+	const char *p;
 
 	git_config(git_diff_ui_config, NULL);
 
@@ -47,7 +49,7 @@ int cmd_range_diff(int argc, const char **argv, const char *prefix)
 
 	options = parse_options_concat(range_diff_options, diffopt.parseopts);
 	argc = parse_options(argc, argv, prefix, options,
-			     builtin_range_diff_usage, 0);
+			     builtin_range_diff_usage, PARSE_OPT_KEEP_DASHDASH);
 
 	diff_setup_done(&diffopt);
 
@@ -55,18 +57,7 @@ int cmd_range_diff(int argc, const char **argv, const char *prefix)
 	if (!simple_color)
 		diffopt.use_color = 1;
 
-	if (argc == 2) {
-		if (!is_range_diff_range(argv[0]))
-			die(_("not a commit range: '%s'"), argv[0]);
-		strbuf_addstr(&range1, argv[0]);
-
-		if (!is_range_diff_range(argv[1]))
-			die(_("not a commit range: '%s'"), argv[1]);
-		strbuf_addstr(&range2, argv[1]);
-	} else if (argc == 3) {
-		strbuf_addf(&range1, "%s..%s", argv[0], argv[1]);
-		strbuf_addf(&range2, "%s..%s", argv[0], argv[2]);
-	} else if (argc == 1) {
+	if (argc == 1) {
 		const char *b = strstr(argv[0], "..."), *a = argv[0];
 		int a_len;
 
@@ -85,6 +76,43 @@ int cmd_range_diff(int argc, const char **argv, const char *prefix)
 			b = "HEAD";
 		strbuf_addf(&range1, "%s..%.*s", b, a_len, a);
 		strbuf_addf(&range2, "%.*s..%s", a_len, a, b);
+	} else if (argc > 1 && (p = strstr(argv[0], "..."))) {
+		const char *a = argv[0];
+		int a_len = (int)(p - a);
+
+		if (!a_len) {
+			a = "HEAD";
+			a_len = strlen(a);
+		}
+		p += 3;
+		if (!*p)
+			p = "HEAD";
+		strbuf_addf(&range1, "%s..%.*s", p, a_len, a);
+		strbuf_addf(&range2, "%.*s..%s", a_len, a, p);
+		strvec_pushv(&other_arg, argv + 1);
+	} else if (argc == 2) {
+		if (!is_range_diff_range(argv[0]))
+			die(_("not a commit range: '%s'"), argv[0]);
+		strbuf_addstr(&range1, argv[0]);
+
+		if (!is_range_diff_range(argv[1]))
+			die(_("not a commit range: '%s'"), argv[1]);
+		strbuf_addstr(&range2, argv[1]);
+	} else if (argc > 2 &&
+	    is_range_diff_range(argv[0]) && is_range_diff_range(argv[1])) {
+		strbuf_addstr(&range1, argv[0]);
+		strbuf_addstr(&range2, argv[1]);
+		strvec_pushv(&other_arg, argv + 2);
+	} else if (argc == 3) {
+		strbuf_addf(&range1, "%s..%s", argv[0], argv[1]);
+		strbuf_addf(&range2, "%s..%s", argv[0], argv[2]);
+	} else if (argc > 3 &&
+		   get_oid_committish(argv[0], &oid) &&
+		   get_oid_committish(argv[1], &oid) &&
+		   get_oid_committish(argv[2], &oid)) {
+		strbuf_addf(&range1, "%s..%s", argv[0], argv[1]);
+		strbuf_addf(&range2, "%s..%s", argv[0], argv[2]);
+		strvec_pushv(&other_arg, argv + 3);
 	} else {
 		error(_("need two commit ranges"));
 		usage_with_options(builtin_range_diff_usage, options);
